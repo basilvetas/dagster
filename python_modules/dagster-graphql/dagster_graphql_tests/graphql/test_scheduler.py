@@ -22,7 +22,9 @@ GET_SCHEDULES_QUERY = '''
         runningSchedules {
           scheduleDefinition {
             name
-            executionParamsString
+            pipelineName
+            mode
+            solidSubset
             environmentConfigYaml
           }
           runs {
