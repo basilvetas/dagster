@@ -5,6 +5,7 @@ import os
 import yaml
 from dagster_graphql import dauphin
 from dagster_graphql.implementation.fetch_schedules import (
+    execution_params_for_schedule,
     get_dagster_schedule_def,
     get_schedule_attempt_filenames,
 )
@@ -14,8 +15,10 @@ from dagster_graphql.schema.errors import (
 )
 
 from dagster import check, seven
-from dagster.core.definitions import ScheduleDefinition, ScheduleExecutionContext
+from dagster.core.definitions import ScheduleDefinition
 from dagster.core.definitions.pipeline import PipelineRunsFilter
+from dagster.core.definitions.schedule import ScheduleExecutionContext
+from dagster.core.errors import ScheduleExecutionError, user_code_error_boundary
 from dagster.core.scheduler import Schedule
 
 
@@ -46,26 +49,51 @@ class DauphinScheduleDefinition(dauphin.ObjectType):
 
     name = dauphin.NonNull(dauphin.String)
     cron_schedule = dauphin.NonNull(dauphin.String)
-    execution_params_string = dauphin.NonNull(dauphin.String)
-    environment_config_yaml = dauphin.NonNull(dauphin.String)
+    pipeline_name = dauphin.NonNull(dauphin.String)
+    solid_subset = dauphin.List(dauphin.String)
+    mode = dauphin.NonNull(dauphin.String)
+    execution_params_string = dauphin.Field(dauphin.String)
+    environment_config_yaml = dauphin.Field(dauphin.String)
 
     def resolve_environment_config_yaml(self, _graphene_info):
         schedule_def = self._schedule_def
-        environment_config = schedule_def.get_environment_dict(self._schedule_context)
+        try:
+            with user_code_error_boundary(
+                # Pass a class that inherits from DagsterUserCodeExecutionError
+                ScheduleExecutionError,
+                # Pass a function that produces a message
+                lambda: 'Error occurred during the execution of environment_dict_fn for schedule '
+                '{schedule_name}'.format(schedule_name=schedule_def.name),
+            ):
+                environment_config = schedule_def.get_environment_dict(self._schedule_context)
+        except ScheduleExecutionError:
+            return None
+
         environment_config_yaml = yaml.dump(environment_config, default_flow_style=False)
         return environment_config_yaml if environment_config_yaml else ''
 
     def __init__(self, graphene_info, schedule_def):
         self._schedule_def = check.inst_param(schedule_def, 'schedule_def', ScheduleDefinition)
         self._schedule_context = ScheduleExecutionContext(graphene_info.context.instance)
-        execution_params = schedule_def.execution_params
-        environment_config = schedule_def.get_environment_dict(self._schedule_context)
-        execution_params['environmentConfigData'] = environment_config
+        self._schedule_def = check.inst_param(schedule_def, 'schedule_def', ScheduleDefinition)
+
+        schedule_def = self._schedule_def
+        execution_params_string = None
+        try:
+            execution_params = execution_params_for_schedule(
+                graphene_info, schedule_def=schedule_def
+            )
+            execution_params_string = seven.json.dumps(execution_params.to_graphql_input())
+        except ScheduleExecutionError:
+            execution_params_string = None
 
         super(DauphinScheduleDefinition, self).__init__(
             name=schedule_def.name,
             cron_schedule=schedule_def.cron_schedule,
-            execution_params_string=seven.json.dumps(execution_params),
+            pipeline_name=schedule_def.selector.name,
+            solid_subset=schedule_def.selector.solid_subset,
+            mode=schedule_def.mode,
+            execution_params_string=execution_params_string,
         )
 
 
