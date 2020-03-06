@@ -107,6 +107,13 @@ fragment stepEventFragment on StepEvent {
       }
     }
   }
+  ... on EngineEvent {
+    metadataEntries {
+      ...eventMetadataEntryFragment
+    }
+    markerStart
+    markerEnd
+  }
 }
 '''
 
