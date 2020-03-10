@@ -358,6 +358,9 @@ class ExecutionPlan(
 
         return ActiveExecution(self, retries, sort_key_fn)
 
+    def single_step_key(self):
+        return self.step_keys_to_execute[0] if len(self.step_keys_to_execute) == 1 else None
+
     @staticmethod
     def build(pipeline_def, environment_config, run_config):
         '''Here we build a new ExecutionPlan from a pipeline definition and the environment config.
